@@ -31,7 +31,7 @@
 }
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;scroll-padding-top:150px}
-body{margin:0;min-height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 var(--ui);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body{margin:0;min-height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 var(--ui);-webkit-font-smoothing:antialiased;overflow-x:clip}
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer}
 img{max-width:100%}
@@ -45,7 +45,8 @@ img{max-width:100%}
 .backdrop svg{position:absolute;left:0;right:0;bottom:0;width:100%;height:42vh;opacity:.55}
 /* contain:paint recorta de verdade: o círculo maior que a tela não pode alargar a página no celular */
 .backdrop,.motes,.rune-frame{contain:strict}
-html{overflow-x:hidden}
+/* clip (e não hidden): hidden no html/body vira contêiner de rolagem e quebra o sticky do topo */
+html{overflow-x:clip}
 /* círculo mágico gigante girando devagar atrás de tudo */
 .rune-ring{position:absolute;left:50%;top:46%;width:min(1100px,140vw);aspect-ratio:1;transform:translate(-50%,-50%);opacity:.13;pointer-events:none}
 .rune-ring svg{width:100%;height:100%;display:block}

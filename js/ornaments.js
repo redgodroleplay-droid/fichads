@@ -69,7 +69,10 @@ const Orn = (() => {
     /* a moldura fica entre o topo (HUD + faixa da Promessa) e a barra de abas do celular */
     const strip = document.querySelector('.oath-strip'), tabs = document.querySelector('.tabs');
     const small = window.innerWidth < 860;
-    frame.style.top = (strip ? Math.round(strip.getBoundingClientRect().bottom) : 0) + 'px';
+    /* altura fixa do topo (HUD + faixa), não a posição atual: assim a moldura não anda ao rolar
+       nem quando a barra do navegador do celular some e dispara um resize */
+    const hud = document.querySelector('.hud');
+    frame.style.top = ((hud ? hud.offsetHeight : 0) + (strip ? strip.offsetHeight : 0)) + 'px';
     frame.style.bottom = (small && tabs && getComputedStyle(tabs).position === 'fixed' ? Math.round(tabs.getBoundingClientRect().height) : 0) + 'px';
     const w = frame.clientWidth, h = frame.clientHeight;
     if (w < 50 || h < 50) return;
