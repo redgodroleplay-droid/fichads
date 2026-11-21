@@ -26,7 +26,11 @@ const Store = (() => {
     lore: [],
     relations: [],
     personality: [], strengths: [], weaknesses: [], quotes: [],
-    journal: []
+    journal: [],
+    /* familiares: [{ name, kind, bond, portrait, hp, maxhp, ac, speed, attrs[6], notes, abilities: [{ name, cost, text, uses, usesMax, reset }] }] */
+    familiars: [],
+    /* árvore de habilidades: nós com ramo, nível, custo e pré-requisitos (ids) */
+    tree: { points: 0, nodes: [] }   // nodes: [{ id, name, branch, tier, cost, req: [], text, unlocked }]
   });
 
   /* Junta o que veio salvo com os padrões, aceitando só tipos compatíveis. */
@@ -47,6 +51,18 @@ const Store = (() => {
     }
     return data ?? base;
   }
+  /* A validação corrige os objetos NO LUGAR. Criar cópias aqui fazia a tela continuar
+     editando o objeto antigo: só a primeira letra de um nome chegava a ser salva. */
+  const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+  const keep = (arr, ok) => { for (let i = arr.length - 1; i >= 0; i--) if (!ok(arr[i])) arr.splice(i, 1); return arr; };
+  const fill = (o, def) => { for (const k of Object.keys(def)) if (!(k in o) || o[k] === null || o[k] === undefined) o[k] = def[k]; return o; };
+  const PORTRAIT = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+  const ID = /^[a-z0-9]{1,24}$/;
+  function cleanAbility(a) {
+    fill(a, { name: '', cost: '', text: '', uses: 0, usesMax: 0, reset: 'long' });
+    a.usesMax = Rules.clamp(Rules.int(a.usesMax, 0), 0, 30);
+    a.uses = Rules.clamp(Rules.int(a.uses, 0), 0, a.usesMax);
+  }
   function sanitize(s) {
     s.attrs = (Array.isArray(s.attrs) && s.attrs.length === 6 ? s.attrs : defaults().attrs).map(n => Rules.clamp(Rules.int(n, 10), 1, 30));
     s.level = Rules.clamp(Rules.int(s.level, 1), 1, 20);
@@ -57,23 +73,53 @@ const Store = (() => {
     s.mana = Rules.clamp(Rules.int(s.mana, 0), 0, s.maxMana);
     s.tempHp = Math.max(0, Rules.int(s.tempHp, 0));
     if (s.autoProf) s.prof = Rules.pbFor(s.level);
-    s.conditions = s.conditions.filter(c => Rules.CONDITIONS.includes(c));
+    keep(s.conditions, c => Rules.CONDITIONS.includes(c));
     if (!Array.isArray(s.promise.seals)) s.promise.seals = [];
-    if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s.portrait) || s.portrait.length > 1500000) s.portrait = '';
-    s.items = s.items.filter(i => i && typeof i.name === 'string').map(i => {
-      const out = { ...i, qty: Math.max(0, Rules.int(i.qty, 1)) };
-      const g = Rules.gearInfo(out);
+    if (!PORTRAIT.test(s.portrait) || s.portrait.length > 1500000) s.portrait = '';
+    keep(s.items, i => isObj(i) && typeof i.name === 'string').forEach(i => {
+      i.qty = Math.max(0, Rules.int(i.qty, 1));
+      const g = Rules.gearInfo(i);
       if (g) {
-        out.pd = Rules.clamp(Rules.int(out.pd, g.max), 0, g.max);
-        if (!Array.isArray(out.combat)) out.combat = [];
-        if (!Array.isArray(out.log)) out.log = [];
+        i.pd = Rules.clamp(Rules.int(i.pd, g.max), 0, g.max);
+        if (!Array.isArray(i.combat)) i.combat = [];
+        if (!Array.isArray(i.log)) i.log = [];
       }
-      return out;
     });
-    s.quests = s.quests.filter(q => q && typeof q === 'object').map(q => ({ title: '', type: 'secundaria', text: '', ...q, objectives: Array.isArray(q.objectives) ? q.objectives : [] }));
-    if (!s.skillInfo || typeof s.skillInfo !== 'object' || Array.isArray(s.skillInfo)) s.skillInfo = {};
-    s.customSkills = s.customSkills.filter(k => k && typeof k === 'object').map(k => ({ name: '', note: '', ...k, attr: Rules.clamp(Rules.int(k.attr, 0), 0, 5), level: Rules.clamp(Rules.int(k.level, 0), 0, 2), extra: Rules.int(k.extra, 0) }));
-    s.journal = s.journal.filter(j => j && typeof j === 'object').map(j => ({ title: '', date: '', text: '', kind: 'registro', pinned: false, ...j, items: Array.isArray(j.items) ? j.items : [] }));
+    keep(s.quests, isObj).forEach(q => { fill(q, { title: '', type: 'secundaria', text: '' }); if (!Array.isArray(q.objectives)) q.objectives = []; });
+    if (!isObj(s.skillInfo)) s.skillInfo = {};
+    keep(s.customSkills, isObj).forEach(k => {
+      fill(k, { name: '', note: '' });
+      k.attr = Rules.clamp(Rules.int(k.attr, 0), 0, 5); k.level = Rules.clamp(Rules.int(k.level, 0), 0, 2); k.extra = Rules.int(k.extra, 0);
+    });
+    keep(s.journal, isObj).forEach(j => { fill(j, { title: '', date: '', text: '', kind: 'registro', pinned: false }); if (!Array.isArray(j.items)) j.items = []; });
+    keep(s.abilities, isObj).forEach(a => { cleanAbility(a); fill(a, { branch: '' }); });
+    keep(s.techniques, isObj).forEach(t => { cleanAbility(t); fill(t, { action: 'acao', range: '', damage: '' }); });
+    keep(s.titles, isObj).forEach(t => fill(t, { name: '', rarity: 'comum', source: '', benefit: '' }));
+    /* familiares */
+    keep(s.familiars, isObj).forEach(f => {
+      fill(f, { name: '', kind: '', bond: '', portrait: '', hp: 1, maxhp: 1, ac: 10, speed: '', notes: '' });
+      ['name', 'kind', 'bond', 'speed', 'notes'].forEach(k => { f[k] = String(f[k]).slice(0, 20000); });
+      f.maxhp = Math.max(1, Rules.int(f.maxhp, 1));
+      f.hp = Rules.clamp(Rules.int(f.hp, f.maxhp), 0, f.maxhp);
+      f.ac = Rules.int(f.ac, 10);
+      f.attrs = (Array.isArray(f.attrs) && f.attrs.length === 6 ? f.attrs : [10, 10, 10, 10, 10, 10]).map(n => Rules.clamp(Rules.int(n, 10), 1, 30));
+      if (typeof f.portrait !== 'string' || !PORTRAIT.test(f.portrait) || f.portrait.length > 400000) f.portrait = '';
+      if (!Array.isArray(f.abilities)) f.abilities = [];
+      keep(f.abilities, isObj).forEach(cleanAbility);
+    });
+    /* árvore de habilidades */
+    if (!isObj(s.tree)) s.tree = { points: 0, nodes: [] };
+    s.tree.points = Math.max(0, Rules.int(s.tree.points, 0));
+    if (!Array.isArray(s.tree.nodes)) s.tree.nodes = [];
+    const seen = new Set();
+    keep(s.tree.nodes, n => isObj(n) && ID.test(n.id) && !seen.has(n.id) && seen.add(n.id)).forEach(n => {
+      fill(n, { name: '', branch: '', text: '', tier: 1, cost: 1, unlocked: false });
+      n.tier = Rules.clamp(Rules.int(n.tier, 1), 1, 10);
+      n.cost = Rules.clamp(Rules.int(n.cost, 1), 0, 99);
+      n.unlocked = n.unlocked === true;
+      if (!Array.isArray(n.req)) n.req = [];
+      keep(n.req, r => r !== n.id && seen.has(r));
+    });
     s.curse.max = Rules.clamp(Rules.int(s.curse.max, 10), 1, 20);
     s.curse.stage = Rules.clamp(Rules.int(s.curse.stage, 0), 0, s.curse.max);
     return s;

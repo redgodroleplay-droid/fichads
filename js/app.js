@@ -73,8 +73,8 @@
   const rollDlg = h('dialog', { class: 'sys', 'aria-labelledby': 'roll-title' });
   document.body.append(rollDlg);
   let lastRoll = null;
-  function openRoll(title, result, expr) {
-    lastRoll = expr ? [title, expr] : lastRoll;
+  function openRoll(title, result, expr, tok) {
+    lastRoll = expr ? [title, expr, tok] : lastRoll;
     const total = h('div', { class: 'roll-total' + (result?.d20 === 20 ? ' crit' : result?.d20 === 1 ? ' fail' : ''), text: result ? String(result.total) : '⚄' });
     const detail = h('p', { class: 'roll-detail', text: result ? result.detail + (result.d20 === 20 ? ' · CRÍTICO' : result.d20 === 1 ? ' · FALHA CRÍTICA' : '') : 'Escolha um dado ou escreva uma expressão.' });
     const exprIn = h('input', { class: 'input', placeholder: 'Ex.: 1d20+DES+PB, 2d6+3', 'aria-label': 'Expressão de dados', value: expr && !result ? expr : '' });
@@ -88,10 +88,11 @@
     rollDlg.querySelector('.win').id = 'roll-title';
     if (!rollDlg.open) rollDlg.showModal();
   }
-  function doRoll(title, expr) {
-    const r = R.rollExpr(expr, tokens());
+  /* tok: atributos de outra criatura (um familiar); sem ele, valem os do personagem */
+  function doRoll(title, expr, tok) {
+    const r = R.rollExpr(expr, tok || tokens());
     if (!r) return openRoll(title, { total: '?', detail: 'Não entendi “' + expr + '”.', d20: null });
-    openRoll(title, r, expr);
+    openRoll(title, r, expr, tok);
   }
   const rollCheck = (title, bonus) => doRoll(title, '1d20' + R.signed(bonus));
   rollDlg.addEventListener('click', e => { if (e.target === rollDlg) rollDlg.close(); });
@@ -111,7 +112,7 @@
 
   /* ---------- HUD e faixa da Promessa ---------- */
   const SCREENS = [
-    ['status', 'Status', '✠', 'Status'], ['skills', 'Habilidades', '✦', 'Hab.'], ['inventory', 'Inventário', '⚔', 'Itens'],
+    ['status', 'Status', '✠', 'Status'], ['skills', 'Habilidades', '✦', 'Hab.'], ['familiars', 'Familiares', '❂', 'Famil.'], ['inventory', 'Inventário', '⚔', 'Itens'],
     ['quests', 'Missões', '❖', 'Missões'], ['record', 'Registro', '❦', 'Registro'], ['journal', 'Diário', '✎', 'Diário']
   ];
   let current = 'status';
@@ -156,7 +157,7 @@
   function render() {
     const fk = document.activeElement?.dataset?.fk;
     const y = window.scrollY;
-    const screen = { status: screenStatus, skills: screenSkills, inventory: screenInventory, quests: screenQuests, record: screenRecord, journal: screenJournal }[current]();
+    const screen = { status: screenStatus, skills: screenSkills, familiars: screenFamiliars, inventory: screenInventory, quests: screenQuests, record: screenRecord, journal: screenJournal }[current]();
     screen.classList.add('screen');
     main.replaceChildren(screen);
     window.scrollTo({ top: y });
@@ -298,11 +299,11 @@
   }
 
   /* Retrato enviado pelo jogador (reduzido para caber no salvamento local) */
-  function shrink(file) {
+  function shrink(file, size = 720) {
     return new Promise((resolve, reject) => {
       const img = new Image(), url = URL.createObjectURL(file);
       img.onload = () => {
-        const k = Math.min(1, 720 / Math.max(img.width, img.height));
+        const k = Math.min(1, size / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
@@ -365,8 +366,9 @@
 
   function rest(kind) {
     const s = st();
-    if (!confirm(kind === 'long' ? 'Fazer um descanso longo? Recupera PV e mana, zera PV temporários e recarrega todos os usos.' : 'Fazer um descanso curto? Recarrega os usos de descanso curto.')) return;
-    [...s.abilities, ...s.techniques].forEach(a => { if (kind === 'long' || a.reset === 'short') a.uses = a.usesMax; });
+    if (!confirm(kind === 'long' ? 'Fazer um descanso longo? Recupera PV e mana (também dos familiares), zera PV temporários e recarrega todos os usos.' : 'Fazer um descanso curto? Recarrega os usos de descanso curto.')) return;
+    [...s.abilities, ...s.techniques, ...s.familiars.flatMap(f => f.abilities)].forEach(a => { if (kind === 'long' || a.reset === 'short') a.uses = a.usesMax; });
+    if (kind === 'long') s.familiars.forEach(f => { f.hp = f.maxhp; });
     s.items.forEach(i => { i.maintShort = false; if (kind === 'long') i.maintLong = false; });
     if (kind === 'long') { s.hp = s.maxhp; s.mana = s.maxMana; s.tempHp = 0; s.conditions = s.conditions.filter(c => c !== 'Concentrando'); }
     refresh();
@@ -374,9 +376,153 @@
   }
 
   /* ================= HABILIDADES ================= */
-  const BRANCHES = {};
   const RESET = [['long', 'Descanso longo'], ['short', 'Descanso curto'], ['none', 'Manual']];
+  /* usos por descanso (pips), comum a habilidades, técnicas e habilidades de familiares */
+  const usesRow = (a, fk) => {
+    const max = Math.max(0, R.int(a.usesMax));
+    const maxIn = numIn(max, { min: 0, max: 30, label: 'Usos máximos', fk: fk + '-max' });
+    maxIn.style.width = '64px';
+    maxIn.addEventListener('change', () => { a.usesMax = R.clamp(R.int(maxIn.value), 0, 30); a.uses = Math.min(R.int(a.uses), a.usesMax); refresh(); });
+    return h('div', { class: 'row' }, h('span', { class: 'muted', style: 'font-size:12px;letter-spacing:.14em', text: 'USOS' }),
+      h('div', { class: 'pips' }, Array.from({ length: max }, (_, k) => h('button', { type: 'button', class: k < a.uses ? 'on' : '', 'aria-label': 'Uso ' + (k + 1) + ' de ' + max,
+        onclick: () => { a.uses = k + 1 === a.uses ? k : k + 1; refresh(); } }))),
+      h('span', { style: 'flex:1' }), maxIn, select(RESET, a.reset || 'long', v => { a.reset = v; save(); }, 'Recarga'));
+  };
+  const footer = (a, list, i, label, diceFrom, tok) => h('div', { class: 'row', style: 'justify-content:space-between' },
+    R.firstDice(diceFrom) ? h('button', { class: 'btn sm', text: '⚄ Rolar ' + R.firstDice(diceFrom), onclick: () => doRoll(a.name || label, R.firstDice(diceFrom), tok?.()) }) : h('span'),
+    h('button', { class: 'btn sm danger', text: '✕ Excluir ' + label, onclick: () => { if (confirm('Excluir “' + (a.name || label) + '”?')) { list.splice(i, 1); refresh(); } } }));
   let openSkill = null, skillTab = 'pericias';
+
+  /* ---------- Árvore de habilidades ---------- */
+  /* Cada nó tem ramo (coluna), nível (linha), custo em pontos e pré-requisitos.
+     Desbloquear exige os pré-requisitos e gasta pontos; bloquear de novo devolve. */
+  let selNode = null, scrollToEditor = false;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const branchOf = n => n.branch.trim() || 'Sem ramo';
+  function treeAdd(parent) {
+    const T = st().tree;
+    const first = T.nodes[0];
+    const n = { id: Math.random().toString(36).slice(2, 10), name: '', branch: parent ? parent.branch : (first ? first.branch : 'Ramo 1'),
+      tier: parent ? Math.min(10, parent.tier + 1) : 1, cost: 1, req: parent ? [parent.id] : [], text: '', unlocked: false };
+    T.nodes.push(n); selNode = n.id; scrollToEditor = true; refresh();
+    setTimeout(() => main.querySelector('[data-fk="tn-name"]')?.focus(), 0);
+  }
+  function treeView() {
+    const s = st(), T = s.tree, nodes = T.nodes;
+    const byId = id => nodes.find(n => n.id === id);
+    const reqMet = n => n.req.every(r => byId(r)?.unlocked);
+    const stateOf = n => n.unlocked ? 'on' : !reqMet(n) ? 'locked' : T.points >= n.cost ? 'ready' : 'poor';
+    if (selNode && !byId(selNode)) selNode = null;
+    const spent = nodes.reduce((t, n) => t + (n.unlocked ? n.cost : 0), 0);
+    const pts = n => n + (n === 1 ? ' ponto' : ' pontos');
+
+    const pointsIn = numIn(T.points, { min: 0, label: 'Pontos disponíveis', fk: 'tree-points', cls: '' });
+    pointsIn.addEventListener('change', () => { T.points = Math.max(0, R.int(pointsIn.value, T.points)); refresh(); });
+    const summary = h('div', { class: 'tiles tree-tiles' },
+      h('div', { class: 'tile' }, h('small', { text: 'Pontos livres' }), pointsIn),
+      h('div', { class: 'tile' }, h('small', { text: 'Gastos' }), h('strong', { text: String(spent) })),
+      h('div', { class: 'tile' }, h('small', { text: 'Desbloqueadas' }), h('strong', { text: nodes.filter(n => n.unlocked).length + '/' + nodes.length })));
+
+    if (!nodes.length) return win('Árvore de habilidades', { orn: '❖' }, summary,
+      empty('❖', 'A árvore está vazia', 'Monte os ramos de evolução do personagem: cada habilidade tem custo em pontos e pode exigir outras antes.', '+ Primeira habilidade da árvore', () => treeAdd(null)));
+
+    /* tabuleiro: coluna de níveis + uma coluna por ramo */
+    const branches = [...new Set(nodes.map(branchOf))];
+    const maxTier = Math.max(...nodes.map(n => n.tier));
+    const board = h('div', { class: 'tree-board', style: 'grid-template-columns:30px repeat(' + branches.length + ',minmax(150px,1fr));grid-template-rows:auto repeat(' + maxTier + ',auto)' });
+    const svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('class', 'tree-lines'); svg.setAttribute('aria-hidden', 'true');
+    board.append(svg);
+    for (let t = 1; t <= maxTier; t++) board.append(h('div', { class: 'tree-tier', style: 'grid-row:' + (t + 1), text: t, title: 'Nível ' + t }));
+    branches.forEach((b, c) => {
+      board.append(h('div', { class: 'tree-branch', style: 'grid-column:' + (c + 2), text: b }));
+      for (let t = 1; t <= maxTier; t++) {
+        const cell = h('div', { class: 'tree-cell', style: 'grid-column:' + (c + 2) + ';grid-row:' + (t + 1) });
+        nodes.filter(n => branchOf(n) === b && n.tier === t).forEach(n => {
+          const sn = stateOf(n);
+          const label = { on: 'desbloqueada', ready: 'pode desbloquear', poor: 'faltam pontos', locked: 'exige pré-requisitos' }[sn];
+          cell.append(h('button', { class: 'tree-node', type: 'button', 'data-id': n.id, 'data-state': sn, 'aria-pressed': String(selNode === n.id), 'aria-label': (n.name || 'Sem nome') + ', ' + pts(n.cost) + ', ' + label,
+            onclick: () => { selNode = selNode === n.id ? null : n.id; scrollToEditor = !!selNode; render(); } },
+            h('span', { class: 'tn-ico', 'aria-hidden': 'true', text: sn === 'on' ? '✦' : sn === 'locked' ? '⛓' : '◇' }),
+            h('span', { class: 'tn-name', text: n.name || 'Sem nome' }),
+            h('small', { text: pts(n.cost) })));
+        });
+        board.append(cell);
+      }
+    });
+    /* linhas entre pré-requisito e habilidade, desenhadas depois que o tabuleiro tem tamanho */
+    const draw = () => {
+      if (!board.isConnected) { ro.disconnect(); return; }
+      const W = board.scrollWidth, H = board.scrollHeight, br = board.getBoundingClientRect();
+      svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      const pos = {};
+      board.querySelectorAll('.tree-node').forEach(el => { const r = el.getBoundingClientRect(); pos[el.dataset.id] = { x: r.left - br.left + r.width / 2, top: r.top - br.top, bottom: r.bottom - br.top }; });
+      const paths = [];
+      nodes.forEach(n => n.req.forEach(rid => {
+        const a = pos[rid], b = pos[n.id], rn = byId(rid); if (!a || !b) return;
+        const y1 = a.bottom, y2 = b.top, my = (y1 + y2) / 2;
+        const cls = rn.unlocked && n.unlocked ? 'on' : rn.unlocked ? 'ready' : '';
+        const sel = selNode && (selNode === n.id || selNode === rid) ? ' sel' : '';
+        paths.push('<path class="' + cls + sel + '" d="M' + a.x.toFixed(1) + ' ' + y1.toFixed(1) + ' C' + a.x.toFixed(1) + ' ' + my.toFixed(1) + ' ' + b.x.toFixed(1) + ' ' + my.toFixed(1) + ' ' + b.x.toFixed(1) + ' ' + y2.toFixed(1) + '"/>');
+      }));
+      svg.innerHTML = paths.join('');
+    };
+    const ro = new ResizeObserver(draw);
+    ro.observe(board);
+    requestAnimationFrame(draw);
+
+    const treeWin = win('Árvore de habilidades', { orn: '❖', note: '✦ desbloqueada · ◇ disponível · ⛓ bloqueada', actions: h('button', { class: 'btn sm', text: '+ Habilidade', onclick: () => treeAdd(null) }) },
+      summary, h('div', { class: 'tree-scroll' }, board),
+      h('p', { class: 'hint', style: 'margin:10px 0 0', text: 'Toque numa habilidade para editar, desbloquear ou criar outra abaixo dela. O ramo vira a coluna e o nível vira a linha.' }));
+    if (!selNode) return treeWin;
+
+    /* editor da habilidade selecionada */
+    const n = byId(selNode), sn = stateOf(n);
+    const descendants = new Set();
+    (function walk(id) { nodes.forEach(m => { if (m.req.includes(id) && !descendants.has(m.id)) { descendants.add(m.id); walk(m.id); } }); })(n.id);
+    const nameIn = h('input', { class: 'input', value: n.name, placeholder: 'Nome da habilidade', 'aria-label': 'Nome da habilidade da árvore', 'data-fk': 'tn-name',
+      oninput: e => { n.name = e.target.value; const el = board.querySelector('[data-id="' + n.id + '"] .tn-name'); if (el) el.textContent = n.name || 'Sem nome'; save(); } });
+    const branchList = h('datalist', { id: 'tree-branches' }, branches.map(b => h('option', { value: b })));
+    const branchIn = h('input', { class: 'input', value: n.branch, placeholder: 'Ramo (ex.: Lâmina, Sombras)', list: 'tree-branches', 'aria-label': 'Ramo', 'data-fk': 'tn-branch', onchange: e => { n.branch = e.target.value; refresh(); } });
+    const tierIn = numIn(n.tier, { min: 1, max: 10, label: 'Nível na árvore', fk: 'tn-tier' });
+    tierIn.addEventListener('change', () => { n.tier = R.clamp(R.int(tierIn.value, n.tier), 1, 10); refresh(); });
+    const costIn = numIn(n.cost, { min: 0, max: 99, label: 'Custo em pontos', fk: 'tn-cost' });
+    costIn.addEventListener('change', () => { n.cost = R.clamp(R.int(costIn.value, n.cost), 0, 99); refresh(); });
+    const options = nodes.filter(m => m.id !== n.id && !descendants.has(m.id));
+    const reqChips = options.length ? h('div', { class: 'row' }, options.map(m => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(n.req.includes(m.id)), text: (m.name || 'Sem nome') + ' · ' + branchOf(m),
+      onclick: () => { n.req = n.req.includes(m.id) ? n.req.filter(x => x !== m.id) : [...n.req, m.id]; refresh(); } })))
+      : h('p', { class: 'hint', style: 'margin:0', text: 'Nenhuma outra habilidade pode ser pré-requisito desta.' });
+
+    const missing = n.req.map(byId).filter(m => m && !m.unlocked).map(m => m.name || 'Sem nome');
+    const blockers = nodes.filter(m => m.unlocked && m.req.includes(n.id)).map(m => m.name || 'Sem nome');
+    let action;
+    if (n.unlocked) action = h('button', { class: 'btn', disabled: blockers.length > 0, text: blockers.length ? 'Bloqueie antes: ' + blockers.join(', ') : 'Bloquear de novo (devolve ' + pts(n.cost) + ')',
+      onclick: () => { n.unlocked = false; T.points += n.cost; refresh(); } });
+    else action = h('button', { class: 'btn primary', disabled: sn !== 'ready', text: sn === 'locked' ? 'Exige: ' + missing.join(', ') : sn === 'poor' ? 'Faltam ' + pts(n.cost - T.points) : '✦ Desbloquear (' + pts(n.cost) + ')',
+      onclick: () => { n.unlocked = true; T.points -= n.cost; refresh(); notify('Árvore de habilidades', 'Desbloqueada: ' + (n.name || 'habilidade sem nome') + '.'); } });
+    const free = n.unlocked ? null : h('button', { class: 'btn sm ghost', text: 'Liberar sem gastar pontos', title: 'Quando o mestre concede a habilidade',
+      onclick: () => { n.unlocked = true; refresh(); notify('Árvore de habilidades', 'Liberada pelo mestre: ' + (n.name || 'habilidade sem nome') + '.'); } });
+    const dice = R.firstDice(n.text);
+    const editor = win(n.name || 'Habilidade da árvore', { orn: '✦', cls: 'tree-editor', actions: h('button', { class: 'x', 'aria-label': 'Fechar editor', text: '×', onclick: () => { selNode = null; render(); } }) },
+      h('div', { class: 'stack', style: 'gap:10px' },
+        h('label', { class: 'lbl' }, 'Nome', nameIn),
+        h('div', { class: 'tree-meta' }, h('label', { class: 'lbl' }, 'Ramo', branchIn, branchList), h('label', { class: 'lbl' }, 'Nível', tierIn), h('label', { class: 'lbl' }, 'Custo', costIn)),
+        field('Descrição', n.text, v => { n.text = v; save(); }, { multiline: true, placeholder: 'O que a habilidade faz, bônus, dano (ex.: 2d8+FOR)…', fk: 'tn-text' }),
+        h('div', { class: 'lbl' }, 'Pré-requisitos', reqChips),
+        h('div', { class: 'row' }, action, free),
+        h('div', { class: 'row', style: 'justify-content:space-between' },
+          h('div', { class: 'row' },
+            h('button', { class: 'btn sm', text: '+ Habilidade abaixo desta', onclick: () => treeAdd(n) }),
+            dice ? h('button', { class: 'btn sm', text: '⚄ Rolar ' + dice, onclick: () => doRoll(n.name || 'Árvore', dice) }) : null),
+          h('button', { class: 'btn sm danger', text: '✕ Excluir', onclick: () => {
+            if (!confirm('Excluir “' + (n.name || 'esta habilidade') + '” da árvore?' + (n.unlocked ? ' Os ' + pts(n.cost) + ' voltam para você.' : ''))) return;
+            if (n.unlocked) T.points += n.cost;
+            nodes.forEach(m => { m.req = m.req.filter(x => x !== n.id); });
+            nodes.splice(nodes.indexOf(n), 1); selNode = null; refresh();
+          } }))));
+    if (scrollToEditor) { scrollToEditor = false; requestAnimationFrame(() => { if (matchMedia('(max-width: 1100px)').matches) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }); }
+    return h('div', { class: 'cols' }, h('div', { class: 'span-8' }, treeWin), h('div', { class: 'span-4' }, editor));
+  }
   function screenSkills() {
     const s = st();
     const lvlMark = ['○', '●', '◆'], lvlName = ['Sem treino', 'Proficiente', 'Especialista'];
@@ -422,21 +568,6 @@
       h('p', { class: 'hint', style: 'margin:10px 0 0', text: 'Toque no nome para rolar. Em ⓘ você anota detalhes e soma bônus extras (itens, talentos, bênçãos…).' }));
     const training = win('Treinamento', { orn: '⛨' }, field(null, s.training, v => { s.training = v; save(); }, { multiline: true, placeholder: 'Resistências, armaduras, armas, ferramentas e idiomas…', fk: 'training' }));
 
-    /* usos por descanso (pips), comum a habilidades e técnicas */
-    const usesRow = (a, fk) => {
-      const max = Math.max(0, R.int(a.usesMax));
-      const maxIn = numIn(max, { min: 0, max: 30, label: 'Usos máximos', fk: fk + '-max' });
-      maxIn.style.width = '64px';
-      maxIn.addEventListener('change', () => { a.usesMax = R.clamp(R.int(maxIn.value), 0, 30); a.uses = Math.min(R.int(a.uses), a.usesMax); refresh(); });
-      return h('div', { class: 'row' }, h('span', { class: 'muted', style: 'font-size:12px;letter-spacing:.14em', text: 'USOS' }),
-        h('div', { class: 'pips' }, Array.from({ length: max }, (_, k) => h('button', { type: 'button', class: k < a.uses ? 'on' : '', 'aria-label': 'Uso ' + (k + 1) + ' de ' + max,
-          onclick: () => { a.uses = k + 1 === a.uses ? k : k + 1; refresh(); } }))),
-        h('span', { style: 'flex:1' }), maxIn, select(RESET, a.reset || 'long', v => { a.reset = v; save(); }, 'Recarga'));
-    };
-    const footer = (a, list, i, label, diceFrom) => h('div', { class: 'row', style: 'justify-content:space-between' },
-      R.firstDice(diceFrom) ? h('button', { class: 'btn sm', text: '⚄ Rolar ' + R.firstDice(diceFrom), onclick: () => doRoll(a.name, R.firstDice(diceFrom)) }) : h('span'),
-      h('button', { class: 'btn sm danger', text: '✕ Excluir ' + label, onclick: () => { if (confirm('Excluir “' + a.name + '”?')) { list.splice(i, 1); refresh(); } } }));
-
     /* Habilidades: traços e poderes (passivos ou ativos) */
     const abilities = s.abilities.map((a, i) => win(a.branch || 'Habilidade', { orn: '✦', cls: 'ability' },
       h('div', { class: 'ability-head' }, h('div', { class: 'glyph' }, h('span', { text: '✦' })),
@@ -481,9 +612,10 @@
     const add = {
       habilidades: () => { s.abilities.push({ name: 'Nova habilidade', branch: '', text: '', cost: '', uses: 0, usesMax: 0, reset: 'long' }); refresh(); focusNew('ab-name-' + (s.abilities.length - 1)); },
       tecnicas: () => { s.techniques.push({ name: 'Nova técnica', action: 'acao', range: '', cost: '', damage: '', text: '', uses: 0, usesMax: 0, reset: 'long' }); refresh(); focusNew('tc-name-' + (s.techniques.length - 1)); },
-      titulos: () => { s.titles.push({ name: '', rarity: 'comum', source: '', benefit: '' }); refresh(); focusNew('tt-name-' + (s.titles.length - 1)); }
+      titulos: () => { s.titles.push({ name: '', rarity: 'comum', source: '', benefit: '' }); refresh(); focusNew('tt-name-' + (s.titles.length - 1)); },
+      arvore: () => treeAdd(null)
     };
-    const TABS = [['pericias', 'Perícias', R.SKILLS.length + s.customSkills.length], ['habilidades', 'Habilidades', s.abilities.length], ['tecnicas', 'Técnicas', s.techniques.length], ['titulos', 'Títulos', s.titles.length]];
+    const TABS = [['pericias', 'Perícias', R.SKILLS.length + s.customSkills.length], ['habilidades', 'Habilidades', s.abilities.length], ['tecnicas', 'Técnicas', s.techniques.length], ['arvore', 'Árvore', s.tree.nodes.length], ['titulos', 'Títulos', s.titles.length]];
     const tabs = h('div', { class: 'row subtabs', role: 'tablist' }, TABS.map(([k, label, n]) =>
       h('button', { class: 'chip', type: 'button', role: 'tab', 'aria-selected': String(skillTab === k), 'aria-pressed': String(skillTab === k), onclick: () => { skillTab = k; openSkill = null; render(); } }, label, h('small', { class: 'count', text: String(n) }))));
     let body;
@@ -492,12 +624,105 @@
       : win('Habilidades', { orn: '✦' }, empty('✦', 'Nenhuma habilidade registrada', 'Traços, poderes passivos e habilidades especiais do personagem, com usos por descanso.', '+ Primeira habilidade', add.habilidades));
     else if (skillTab === 'tecnicas') body = techniques.length ? h('div', { class: 'ability-grid' }, techniques)
       : win('Técnicas', { orn: '⚔' }, empty('⚔', 'Nenhuma técnica registrada', 'Golpes, disparos e manobras: tipo de ação, alcance, custo e dano com rolagem.', '+ Primeira técnica', add.tecnicas));
+    else if (skillTab === 'arvore') body = treeView();
     else body = titles.length ? h('div', { class: 'title-grid' }, titles)
       : win('Títulos', { orn: '♛' }, empty('♛', 'Nenhum título conquistado', 'Nomes ganhos na jornada, com raridade e benefício. Um deles pode virar o título exibido no Status.', '+ Primeiro título', add.titulos));
-    const addLabel = { habilidades: '+ Habilidade', tecnicas: '+ Técnica', titulos: '+ Título' }[skillTab];
+    const addLabel = { habilidades: '+ Habilidade', tecnicas: '+ Técnica', arvore: '+ Na árvore', titulos: '+ Título' }[skillTab];
     return h('div', {},
-      screenHead('Habilidades', 'Perícias, habilidades, técnicas e títulos', addLabel ? h('button', { class: 'btn primary', text: addLabel, onclick: add[skillTab] }) : null),
+      screenHead('Habilidades', 'Perícias, habilidades, técnicas, árvore e títulos', addLabel ? h('button', { class: 'btn primary', text: addLabel, onclick: add[skillTab] }) : null),
       tabs, body);
+  }
+
+  /* ================= FAMILIARES ================= */
+  /* Criaturas ligadas ao personagem: vida, CA, atributos próprios e habilidades com usos */
+  const newFamiliar = () => ({ name: '', kind: '', bond: '', portrait: '', hp: 10, maxhp: 10, ac: 10, speed: '', attrs: [10, 10, 10, 10, 10, 10], notes: '', abilities: [] });
+  function screenFamiliars() {
+    const s = st();
+    const addFam = () => { s.familiars.push(newFamiliar()); refresh(); setTimeout(() => main.querySelector('[data-fk="fm-' + (s.familiars.length - 1) + '-name"]')?.focus(), 0); };
+    const cards = s.familiars.map((f, i) => {
+      const fk = 'fm-' + i + '-';
+      const who = () => f.name || 'Familiar';
+      /* PB e nível são os do personagem; os modificadores são os do familiar */
+      const famTokens = () => { const t = { PB: s.prof, NIV: s.level }; R.ATTRS.forEach(([k], n) => { t[k] = R.mod(f.attrs[n]); }); return t; };
+      let card;
+
+      const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+      file.addEventListener('change', async () => {
+        const fl = file.files[0]; if (!fl) return;
+        try { if (fl.size > 15 * 1024 * 1024) throw Error(); f.portrait = await shrink(fl, 360); refresh(); notify('Familiar', 'Retrato atualizado.'); }
+        catch { notify('Familiar', 'Não foi possível usar essa imagem.'); }
+        finally { file.value = ''; }
+      });
+      const pic = h('button', { class: 'fam-pic' + (f.portrait ? '' : ' empty'), type: 'button', 'aria-label': f.portrait ? 'Trocar retrato de ' + who() : 'Adicionar retrato do familiar', title: f.portrait ? 'Trocar retrato' : 'Adicionar retrato', onclick: () => file.click() },
+        f.portrait ? h('img', { src: f.portrait, alt: '' }) : h('span', { text: '❂', 'aria-hidden': 'true' }));
+
+      const ident = h('div', { class: 'fam-ident' },
+        h('div', { class: 'ability-head' }, h('input', { value: f.name, placeholder: 'Nome do familiar', 'aria-label': 'Nome do familiar', 'data-fk': fk + 'name',
+          oninput: e => { f.name = e.target.value; card.querySelector('.win-title').textContent = who(); save(); } })),
+        field(null, f.kind, v => { f.kind = v; save(); }, { placeholder: 'Espécie / tipo (corvo, lobo espectral…)', fk: fk + 'kind' }),
+        field(null, f.bond, v => { f.bond = v; save(); }, { placeholder: 'Vínculo (como se ligou ao personagem)', fk: fk + 'bond' }));
+
+      /* vida, CA e deslocamento */
+      const hpIn = numIn(f.hp, { min: 0, label: 'PV atuais de ' + who(), fk: fk + 'hp' });
+      const maxIn = numIn(f.maxhp, { min: 1, label: 'PV máximos de ' + who(), fk: fk + 'maxhp' });
+      [hpIn, maxIn].forEach(x => { x.className = ''; });
+      hpIn.addEventListener('change', () => { f.hp = R.int(hpIn.value, f.hp); refresh(); });
+      maxIn.addEventListener('change', () => { f.maxhp = R.int(maxIn.value, f.maxhp); refresh(); });
+      const amt = numIn(1, { min: 1, label: 'Quantidade', fk: fk + 'amt' });
+      const dmg = h('form', { class: 'dmg-form' }, amt, h('button', { class: 'btn danger', value: 'dmg', text: 'Dano' }), h('button', { class: 'btn', value: 'heal', text: 'Cura' }));
+      dmg.addEventListener('submit', e => {
+        e.preventDefault(); const n = Math.max(0, R.int(amt.value)); if (!n) return;
+        if (e.submitter?.value === 'heal') { const b = f.hp; f.hp = Math.min(f.maxhp, f.hp + n); notify(who(), '+' + (f.hp - b) + ' PV'); }
+        else { f.hp = Math.max(0, f.hp - n); notify(who(), '−' + n + ' PV' + (f.hp === 0 ? ' · Caído' : '')); }
+        refresh();
+      });
+      const acIn = numIn(f.ac, { label: 'CA de ' + who(), fk: fk + 'ac', cls: '' });
+      acIn.addEventListener('change', () => { f.ac = R.int(acIn.value, f.ac); refresh(); });
+      const spIn = h('input', { value: f.speed, placeholder: '—', 'aria-label': 'Deslocamento de ' + who(), 'data-fk': fk + 'speed', oninput: e => { f.speed = e.target.value; save(); } });
+      const ini = R.mod(f.attrs[1]);
+      const vitals = h('div', { class: 'vitals' },
+        h('div', {}, h('div', { class: 'vital-top' }, h('span', { text: 'PONTOS DE VIDA' }), h('b', {}, hpIn, ' / ', maxIn)), bar('hp' + (f.hp / f.maxhp <= 0.3 ? ' low' : ''), f.hp, f.maxhp)),
+        dmg,
+        h('div', { class: 'tiles fam-tiles' },
+          h('div', { class: 'tile' }, h('small', { text: 'CA' }), acIn),
+          h('div', { class: 'tile' }, h('small', { text: 'Iniciativa' }), h('button', { class: 'btn ghost', style: 'border:0;font:700 24px var(--title);min-height:0;padding:0', text: R.signed(ini), title: 'Rolar iniciativa', onclick: () => rollCheck(who() + ' · Iniciativa', ini) })),
+          h('div', { class: 'tile' }, h('small', { text: 'Desloc.' }), spIn)));
+
+      /* atributos próprios */
+      const attrs = h('div', { class: 'fam-attrs' }, R.ATTRS.map(([abbr, name], k) => {
+        const inp = numIn(f.attrs[k], { min: 1, max: 30, label: name + ' de ' + who(), fk: fk + 'at' + k, cls: '' });
+        inp.addEventListener('change', () => { f.attrs[k] = R.clamp(R.int(inp.value, 10), 1, 30); refresh(); });
+        const m = R.mod(f.attrs[k]);
+        return h('div', { class: 'fam-attr' }, h('abbr', { title: name, text: abbr }), inp,
+          h('button', { class: 'btn sm', type: 'button', text: R.signed(m), 'aria-label': 'Rolar ' + name + ' de ' + who() + ' (' + R.signed(m) + ')', onclick: () => rollCheck(who() + ' · ' + name, m) }));
+      }));
+
+      /* habilidades do familiar */
+      const addAb = () => { f.abilities.push({ name: '', cost: '', text: '', uses: 0, usesMax: 0, reset: 'long' }); refresh(); setTimeout(() => main.querySelector('[data-fk="' + fk + 'ab-name-' + (f.abilities.length - 1) + '"]')?.focus(), 0); };
+      const abilities = f.abilities.map((a, j) => h('div', { class: 'fam-ability' },
+        h('div', { class: 'ability-head' }, h('div', { class: 'glyph fam' }, h('span', { text: '✧' })),
+          h('input', { value: a.name, placeholder: 'Nome da habilidade', 'aria-label': 'Nome da habilidade de ' + who(), 'data-fk': fk + 'ab-name-' + j, oninput: e => { a.name = e.target.value; save(); } })),
+        field(null, a.cost, v => { a.cost = v; save(); }, { placeholder: 'Custo / ativação', fk: fk + 'ab-cost-' + j }),
+        field(null, a.text, v => { a.text = v; save(); }, { multiline: true, placeholder: 'O que faz (ex.: mordida 1d6+FOR)…', fk: fk + 'ab-text-' + j }),
+        usesRow(a, fk + 'ab-' + j), footer(a, f.abilities, j, 'habilidade', a.text, famTokens)));
+
+      card = win(who(), { orn: '❂', cls: 'familiar' },
+        h('div', { class: 'fam-top' }, h('div', { class: 'fam-pic-wrap' }, pic, file), ident),
+        h('div', { class: 'fam-body' },
+          h('div', { class: 'stack', style: 'gap:14px' }, vitals, h('div', {}, h('p', { class: 'fam-label', text: 'ATRIBUTOS · toque no bônus para rolar' }), attrs)),
+          h('div', { class: 'stack', style: 'gap:10px' },
+            h('div', { class: 'row', style: 'justify-content:space-between' }, h('p', { class: 'fam-label', text: 'HABILIDADES DO FAMILIAR · ' + f.abilities.length }), h('button', { class: 'btn sm', text: '+ Habilidade', onclick: addAb })),
+            abilities.length ? abilities : h('p', { class: 'hint', style: 'margin:0', text: 'Ataques, sentidos, magias e truques do familiar, com usos por descanso.' }))),
+        field('Anotações', f.notes, v => { f.notes = v; save(); }, { multiline: true, placeholder: 'Personalidade, ordens que obedece, o que sabe fazer fora de combate…', fk: fk + 'notes' }),
+        h('div', { class: 'row', style: 'justify-content:space-between' },
+          f.portrait ? h('button', { class: 'btn sm ghost', text: 'Remover retrato', onclick: () => { if (confirm('Remover o retrato de ' + who() + '?')) { f.portrait = ''; refresh(); } } }) : h('span'),
+          h('button', { class: 'btn sm danger', text: '✕ Excluir familiar', onclick: () => { if (confirm('Excluir ' + who() + ' e todas as habilidades dele?')) { s.familiars.splice(i, 1); refresh(); } } })));
+      return card;
+    });
+    return h('div', {},
+      screenHead('Familiares', 'Criaturas ligadas ao portador', h('button', { class: 'btn primary', text: '+ Familiar', onclick: addFam })),
+      cards.length ? h('div', { class: 'fam-grid' }, cards)
+        : win('Familiares', { orn: '❂' }, empty('❂', 'Nenhum familiar ainda', 'Companheiros, invocações e montarias: vida, CA, atributos próprios e as habilidades de cada um.', '+ Primeiro familiar', addFam)));
   }
 
   /* ================= INVENTÁRIO ================= */
@@ -874,6 +1099,10 @@
         check('Modo calmo (sem partículas)', 'calm', () => document.body.classList.toggle('calm', prefs.calm === true)),
         h('button', { class: 'btn', text: 'Ver a entrada de novo', onclick: () => { setDlg.close(); window.Intro?.play(true); } }),
         h('div', { class: 'divider' }),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn primary', text: '✉ Compartilhar ficha', onclick: () => { setDlg.close(); window.Share?.open(); } }),
+          h('button', { class: 'btn', text: 'Abrir ficha compartilhada', onclick: () => { setDlg.close(); window.Share?.openReceive(); } })),
+        h('p', { class: 'hint', text: 'Gera um link criptografado com a ficha inteira, para enviar por WhatsApp, Discord ou e-mail. Só este site sabe abrir.' }),
         h('div', { class: 'row' }, h('button', { class: 'btn', text: 'Exportar JSON', onclick: () => Store.exportJson() }), h('button', { class: 'btn', text: 'Importar JSON', onclick: () => file.click() }), file),
         h('p', { class: 'hint', text: 'A ficha fica salva só neste navegador. Exporte antes de trocar de aparelho ou limpar os dados.' }),
         h('button', { class: 'btn danger', text: 'Recomeçar a ficha do zero', onclick: () => { if (confirm('Apagar tudo desta ficha neste navegador e voltar aos dados iniciais? Exporte antes se quiser guardar.')) { Store.reset(); setDlg.close(); render(); } } }))));
