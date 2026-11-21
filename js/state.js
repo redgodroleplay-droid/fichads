@@ -46,7 +46,9 @@ const Store = (() => {
         if (!(k in base)) { if (['string', 'number', 'boolean', 'object'].includes(typeof data[k])) out[k] = data[k]; continue; }
         const b = base[k], v = data[k];
         if (typeof b === 'number') out[k] = Number.isFinite(v) ? v : b;
-        else if (typeof b === 'string') out[k] = typeof v === 'string' ? v.slice(0, 50000) : b;
+        /* o retrato é uma imagem em base64 (até 1,5 MB, conferido em sanitize): cortá-lo em 50 mil
+           caracteres estragava a imagem a cada recarga */
+        else if (typeof b === 'string') out[k] = typeof v === 'string' ? v.slice(0, k === 'portrait' ? 1500000 : 50000) : b;
         else if (typeof b === 'boolean') out[k] = typeof v === 'boolean' ? v : b;
         else out[k] = merge(b, v);
       }
