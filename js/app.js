@@ -799,13 +799,19 @@
     const parts = [
       h('div', { class: 'row', style: 'flex-wrap:nowrap' },
         select(ICONS.map(c => [c, c]), it.icon || '✦', v => { it.icon = v; refresh(); }, 'Ícone'),
-        field(null, it.name, v => { it.name = v; save(); }, { fk: 'it-name' })),
+        /* o nome atualiza o espaço da grade na hora, sem redesenhar (redesenhar tiraria o foco do campo) */
+        field(null, it.name, v => {
+          it.name = v; save();
+          const slot = main.querySelector('[data-fk="slot-' + selItem + '"]');
+          if (slot) { slot.title = v; slot.querySelector('.nm').textContent = v; }
+        }, { fk: 'it-name' })),
       kindRow,
       g ? durabilityPanel(it, g) : h('p', { class: 'hint', style: 'margin:0', text: 'Escolha Arma, Armadura ou Escudo para controlar a durabilidade deste item.' }),
       h('div', { class: 'row' }, h('label', { class: 'lbl', style: 'width:100px' }, 'Qtd.', qtyIn),
         h('button', { class: 'chip', type: 'button', 'aria-pressed': String(!!it.equipped), text: it.equipped ? 'Equipado' : 'Equipar', onclick: () => { it.equipped = !it.equipped; refresh(); } }),
         h('button', { class: 'chip', type: 'button', 'aria-pressed': String(!!it.key), text: '★ Item de missão', onclick: () => { it.key = !it.key; refresh(); } })),
-      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, field(null, it.damage, v => { it.damage = v; save(); }, { placeholder: 'Dano (ex.: 1d8+DES)', fk: 'it-dmg' }),
+      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, /* ao sair do campo, redesenha para mostrar (ou esconder) o botão Rolar */
+        (el => { el.addEventListener('change', render); return el; })(field(null, it.damage, v => { it.damage = v; save(); }, { placeholder: 'Dano (ex.: 1d8+DES)', fk: 'it-dmg' })),
         R.firstDice(it.damage) ? h('button', { class: 'btn', text: 'Rolar', onclick: () => doRoll('Dano · ' + it.name, R.firstDice(it.damage)) }) : null),
       field(null, it.notes, v => { it.notes = v; save(); }, { multiline: true, placeholder: 'Descrição e observações…', fk: 'it-notes' })
     ];
