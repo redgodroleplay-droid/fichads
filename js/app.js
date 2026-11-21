@@ -112,7 +112,7 @@
 
   /* ---------- HUD e faixa da Promessa ---------- */
   const SCREENS = [
-    ['status', 'Status', '✠', 'Status'], ['skills', 'Habilidades', '✦', 'Hab.'], ['familiars', 'Familiares', '❂', 'Famil.'], ['inventory', 'Inventário', '⚔', 'Itens'],
+    ['status', 'Status', '✠', 'Status'], ['skills', 'Habilidades', '✦', 'Hab.'], ['grimoires', 'Grimórios', '✧', 'Grim.'], ['familiars', 'Familiares', '❂', 'Famil.'], ['inventory', 'Inventário', '⚔', 'Itens'],
     ['quests', 'Missões', '❖', 'Missões'], ['record', 'Registro', '❦', 'Registro'], ['journal', 'Diário', '✎', 'Diário']
   ];
   let current = 'status';
@@ -157,7 +157,7 @@
   function render() {
     const fk = document.activeElement?.dataset?.fk;
     const y = window.scrollY;
-    const screen = { status: screenStatus, skills: screenSkills, familiars: screenFamiliars, inventory: screenInventory, quests: screenQuests, record: screenRecord, journal: screenJournal }[current]();
+    const screen = { status: screenStatus, skills: screenSkills, grimoires: screenGrimoires, familiars: screenFamiliars, inventory: screenInventory, quests: screenQuests, record: screenRecord, journal: screenJournal }[current]();
     screen.classList.add('screen');
     main.replaceChildren(screen);
     window.scrollTo({ top: y });
@@ -632,6 +632,12 @@
       screenHead('Habilidades', 'Perícias, habilidades, técnicas, árvore e títulos', addLabel ? h('button', { class: 'btn primary', text: addLabel, onclick: add[skillTab] }) : null),
       tabs, body);
   }
+
+  /* ================= GRIMÓRIOS ================= */
+  /* A tela mora em js/grimorios.js; aqui só entregamos os construtores da ficha */
+  const screenGrimoires = () => window.Grimoires
+    ? Grimoires.screen({ h, win, field, select, screenHead, empty, notify, save, refresh, render, main })
+    : h('div', {}, screenHead('Grimórios', 'Não foi possível carregar js/grimorios.js'));
 
   /* ================= FAMILIARES ================= */
   /* Criaturas ligadas ao personagem: vida, CA, atributos próprios e habilidades com usos */

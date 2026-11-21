@@ -30,7 +30,10 @@ const Store = (() => {
     /* familiares: [{ name, kind, bond, portrait, hp, maxhp, ac, speed, attrs[6], notes, abilities: [{ name, cost, text, uses, usesMax, reset }] }] */
     familiars: [],
     /* árvore de habilidades: nós com ramo, nível, custo e pré-requisitos (ids) */
-    tree: { points: 0, nodes: [] }   // nodes: [{ id, name, branch, tier, cost, req: [], text, unlocked }]
+    tree: { points: 0, nodes: [] },  // nodes: [{ id, name, branch, tier, cost, req: [], text, unlocked }]
+    /* grimórios: [{ id, name, school, desc, notes, fields: [{ label, value }], spellFields: [{ id, label }],
+       spells: [{ id, name, text, values: { [fieldId]: texto }, extra: [{ label, value }] }] }] — ver js/grimorios.js */
+    grimoires: []
   });
 
   /* Junta o que veio salvo com os padrões, aceitando só tipos compatíveis. */
@@ -120,6 +123,8 @@ const Store = (() => {
       if (!Array.isArray(n.req)) n.req = [];
       keep(n.req, r => r !== n.id && seen.has(r));
     });
+    /* grimórios (validação no lugar, em js/grimorios.js) */
+    s.grimoires = window.Grimoires ? Grimoires.clean(s.grimoires) : (Array.isArray(s.grimoires) ? s.grimoires : []);
     s.curse.max = Rules.clamp(Rules.int(s.curse.max, 10), 1, 20);
     s.curse.stage = Rules.clamp(Rules.int(s.curse.stage, 0), 0, s.curse.max);
     return s;

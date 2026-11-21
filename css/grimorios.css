@@ -1,0 +1,67 @@
+/* ---------- Grimórios (js/grimorios.js) ---------- */
+.gr-tabs{flex-wrap:nowrap;overflow-x:auto;padding:4px 2px 6px;scrollbar-width:thin}
+.gr-tabs .chip{flex:none;max-width:240px}
+.gr-tab-name{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.gr-cols{align-items:start}
+.gr-book .win-head{flex-wrap:nowrap}
+.gr-book .win-title{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;line-height:1.3}
+/* no celular as magias vêm primeiro; os detalhes do grimório descem */
+@media (max-width:860px){.gr-cols>.span-8{order:-1}}
+.gr-book .lbl,.gr-spell-edit .lbl{font-size:10.5px}
+/* o rótulo (.lbl) é pequeno e o campo herdaria esse tamanho */
+.gr-book .lbl :is(.input,.area),.gr-spell-edit .lbl :is(.input,.area){font-size:15px;font-weight:400;letter-spacing:normal}
+
+/* controles pequenos (subir, descer, excluir) */
+.gr-ctl{display:flex;align-items:center;gap:2px;flex:none}
+.gr-icon{width:32px;height:32px;border:1px solid transparent;border-radius:var(--r);font-size:15px;line-height:1}
+.gr-icon:hover:not(:disabled){border-color:var(--line-soft);color:var(--ice)}
+.gr-ctl .gr-icon:last-child:not(:disabled):hover{color:var(--danger)}
+.gr-book .win-head .gr-icon:hover:not(:disabled){color:var(--ice)}
+.gr-icon:disabled{opacity:.25;cursor:default}
+
+/* campos livres: rótulo + valor */
+.gr-pair{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) auto;gap:6px;align-items:center}
+.gr-pair-label{color:var(--ice);font-size:12.5px;letter-spacing:.06em}
+.gr-sf{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+
+/* magias */
+.gr-search{margin:0 0 12px}
+.gr-spell-list{display:grid;gap:10px}
+.gr-spell{border:1px solid var(--line-soft);border-radius:var(--r);background:#050b1c66;transition:border-color .2s,box-shadow .2s}
+.gr-spell:hover{border-color:var(--line)}
+.gr-spell.open{border-color:var(--glow-2);box-shadow:0 0 16px #4d8dff2e}
+.gr-spell-top{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 0}
+.gr-spell-head{flex:1;min-width:0;display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 4px 6px 12px;border:0;background:none;color:var(--text);text-align:left}
+.gr-spell-glyph{display:grid;place-items:center;flex:none;width:28px;height:28px;border:1px solid var(--glow-2);transform:rotate(45deg);background:#0a1636;box-shadow:0 0 10px #4d8dff44}
+.gr-spell-glyph span{transform:rotate(-45deg);font-size:12px;color:#fff}
+.gr-spell-title{display:grid;min-width:0;line-height:1.25}
+.gr-spell-name{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:700 15.5px var(--title);letter-spacing:.05em;color:#fff}
+.gr-spell-title small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--glow-2);font-size:11.5px;letter-spacing:.08em}
+.gr-caret{margin-left:auto;padding-left:6px;font-style:normal;color:var(--mute)}
+.gr-spell-head:hover .gr-caret{color:var(--ice)}
+
+.gr-spell-read{display:grid;gap:8px;padding:0 14px 12px}
+.gr-dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:6px;margin:0}
+.gr-dl>div{display:grid;gap:2px;min-width:0;padding:5px 8px;border-left:2px solid var(--line);background:#0a143066}
+.gr-dl dt{color:var(--mute);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.gr-dl dd{margin:0;font-size:13.5px;line-height:1.35;overflow-wrap:anywhere}
+.gr-spell-text{margin:0;color:var(--dim);font:500 16px/1.45 var(--read);white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+
+.gr-spell-edit{display:grid;gap:10px;padding:4px 12px 12px}
+.gr-spell-grid .lbl{grid-template-rows:1fr auto;align-items:end}
+.gr-spell-name-in{font:700 16px var(--title);letter-spacing:.05em}
+.gr-spell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,170px),1fr));gap:8px}
+
+/* tablet: grimório e magias continuam lado a lado */
+@media (min-width:861px) and (max-width:1100px){
+  .gr-cols>.span-4{grid-column:span 5}
+  .gr-cols>.span-8{grid-column:span 7}
+}
+@media (max-width:560px){
+  .gr-pair{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l c" "v v"}
+  .gr-pair>.gr-pair-label{grid-area:l}
+  .gr-pair>.gr-ctl{grid-area:c}
+  .gr-pair>input:nth-child(2){grid-area:v}
+  .gr-spell-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .gr-dl{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
